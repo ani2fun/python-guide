@@ -1,0 +1,11 @@
+{
+    "title": "Python",
+    "description": "Python from first steps to advanced — control flow, working with data, how Python really works under the hood, object-oriented design, and advanced features.",
+    "tags": [
+        "python",
+        "programming-languages"
+    ],
+    "estimatedReadingMinutes": 500,
+    "order": 6,
+    "slug": "python"
+}
