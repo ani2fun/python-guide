@@ -51,7 +51,13 @@ This is the deep pass of [Functions, the Basics](/synapse/programming-languages/
   - [8. Docstrings, annotations, introspection](#8-docstrings-annotations-introspection)
   - [9. First-class and higher-order functions](#9-first-class-and-higher-order-functions)
   - [10. Lambdas and the late-binding trap](#10-lambdas-and-the-late-binding-trap)
-    - [The late-binding trap](#the-late-binding-trap)
+  - [The late-binding trap](#the-late-binding-trap)
+    - [It is not about loops](#it-is-not-about-loops)
+    - [It is not about `lambda` either](#it-is-not-about-lambda-either)
+    - [Proving they share one variable](#proving-they-share-one-variable)
+    - [When it does *not* bite](#when-it-does-not-bite)
+    - [A comprehension's private scope will not save you](#a-comprehensions-private-scope-will-not-save-you)
+    - [Forcing an early snapshot](#forcing-an-early-snapshot)
   - [11. Closures](#11-closures)
   - [12. `map`, `filter`, `reduce`, and `key=`](#12-map-filter-reduce-and-key)
     - [`key=` in `sorted`, `min`, `max`](#key-in-sorted-min-max)
@@ -753,21 +759,22 @@ The two keywords are not interchangeable, and `global` is not just "`nonlocal`, 
 ```python run
 n = "module"
 
-
 def outer():
     n = "enclosing"
 
     def write_global():
-        global n        # skips outer entirely — targets module level
+        global n
         n = "set by write_global"
 
     def write_nonlocal():
-        nonlocal n      # nearest enclosing function — that's outer
+        nonlocal n
         n = "set by write_nonlocal"
 
-    write_global()
+    print("before:", n)          # enclosing
     write_nonlocal()
-    print("outer's n:", n)
+    print("after nonlocal:", n)  # set by write_nonlocal
+    write_global()
+    print("after global:", n)    # still set by write_nonlocal — global never touches this n
 
 
 outer()
@@ -776,7 +783,9 @@ print("module n: ", n)
 
 **Output:**
 ```
-outer's n: set by write_nonlocal
+before: enclosing
+after nonlocal: set by write_nonlocal
+after global: set by write_nonlocal
 module n:  set by write_global
 ```
 
@@ -1057,6 +1066,19 @@ print((lambda x: x * 2)(5))     # build and call immediately
 10
 ```
 
+Only the *body* is restricted. The parameter list follows the same rules as `def` — zero or more parameters, defaults, `*args`, `**kwargs`:
+
+```python run
+print((lambda: "no arguments")())
+print((lambda a, b=2, *rest: (a, b, rest))(1, 5, 9, 10))
+```
+
+**Output:**
+```
+no arguments
+(1, 5, (9, 10))
+```
+
 What `lambda` produces is not a lesser kind of function. It is the same object `def` produces, differing in exactly one respect:
 
 ```python run
@@ -1093,7 +1115,7 @@ print(parity(4), parity(7))
 even odd
 ```
 
-### The late-binding trap
+## The late-binding trap
 
 ```python run
 funcs = [lambda: i for i in range(3)]
@@ -1107,7 +1129,116 @@ print([f() for f in funcs])
 
 **Analysis.** Three separate lambdas were built, and all three print `2`. The reason is that none of them stored a value. Each one stored a *reference to the variable* `i`, and the comprehension used a single `i` that it advanced to `2` before any lambda was ever called. By the time `f()` runs, there is one `i` and its value is `2` — so all three agree.
 
-**The fix** — force an early snapshot with a default argument, which (as §4 showed) is evaluated at definition time:
+Before reaching for a fix, it is worth pinning down what is actually causing this, because the loop and the `lambda` are both innocent bystanders.
+
+### It is not about loops
+
+Strip the loop away entirely and the behaviour survives:
+
+```python run
+i = 0
+f = lambda: i
+i = 99
+print(f())
+```
+
+**Output:**
+```
+99
+```
+
+The `i` in the body was never resolved when the lambda was built. It is resolved when `f()` *runs*, by the ordinary scope-lookup rules — the same machinery that makes `global` and `nonlocal` bind a name to a **scope** rather than to a value. The lambda stored the *question* "what is `i`?", not the answer. Rebinding `i` afterwards changes the answer, and the lambda has no say in it.
+
+A loop is simply the fastest way to rebind the same name several times before anyone calls anything.
+
+### It is not about `lambda` either
+
+`def` closes over variables by exactly the same rules:
+
+```python run
+funcs = []
+for i in range(3):
+    def f():
+        return i
+    funcs.append(f)
+
+print([g() for g in funcs])
+```
+
+**Output:**
+```
+[2, 2, 2]
+```
+
+Nothing about `lambda` is special here. What is special is *deferring the call* until after the variable has moved on.
+
+### Proving they share one variable
+
+The shared variable is a real object you can inspect. A free variable captured by a nested function lives in a **cell**, and every closure over that variable holds the *same* cell:
+
+```python run
+def make_all():
+    funcs = []
+    for i in range(3):
+        funcs.append(lambda: i)
+    return funcs
+
+
+fs = make_all()
+print(fs[0].__closure__[0].cell_contents)
+print(fs[0].__closure__[0] is fs[1].__closure__[0])
+```
+
+**Output:**
+```
+2
+True
+```
+
+One cell, three lambdas pointing at it. `is` returning `True` is the whole bug in one line — there was never anything per-iteration to disagree about.
+
+### When it does *not* bite
+
+If the call happens before the variable moves on, there is no trap:
+
+```python run
+results = []
+for i in range(3):
+    f = lambda: i
+    results.append(f())      # called now, while i still holds this iteration's value
+print(results)
+```
+
+**Output:**
+```
+[0, 1, 2]
+```
+
+Same shared variable, but each `f()` runs while `i` still holds that iteration's value. The bug needs *deferral* — storing the function now and calling it later.
+
+### A comprehension's private scope will not save you
+
+In Python 3 a comprehension does get its own scope, which is why the loop variable does not leak:
+
+```python run
+funcs = [lambda: i for i in range(3)]
+print([f() for f in funcs])
+print("i" in dir())          # False -- i never escaped the comprehension
+```
+
+**Output:**
+```
+[2, 2, 2]
+False
+```
+
+But that scope is **one frame for the whole comprehension**, not one frame per iteration. The isolation protects the code *outside* the comprehension from the loop variable; it does nothing for the closures built *inside* it. Reading "comprehensions have their own scope" as "comprehensions are safe here" is a common and expensive mistake.
+
+### Forcing an early snapshot
+
+Every fix does the same thing: it makes each function get its *own* variable, filled in at build time.
+
+**1. Default argument** — evaluated at definition time (as §4 showed), so the value is frozen into the lambda's own parameter:
 
 ```python run
 funcs = [lambda i=i: i for i in range(3)]
@@ -1119,7 +1250,48 @@ print([f() for f in funcs])
 [0, 1, 2]
 ```
 
-Each lambda now has its own parameter `i`, filled in with the loop's current value at the moment that lambda was built. Nothing is shared, so nothing changes underneath them.
+Each lambda now has its own parameter `i`, filled in with the loop's current value at the moment that lambda was built. Nothing is shared, so nothing changes underneath them. The cost is that the snapshot is now part of the signature — `funcs[0](99)` returns `99` — which matters if a framework calls your callback with arguments.
+
+**2. Factory function** — a fresh call means a fresh local variable, and therefore a fresh cell:
+
+```python run
+def bind(i):
+    return lambda: i
+
+
+funcs = [bind(i) for i in range(3)]
+print([f() for f in funcs])
+```
+
+**Output:**
+```
+[0, 1, 2]
+```
+
+**3. `functools.partial`** — binds the argument when `partial()` runs, not when the result is called:
+
+```python run
+from functools import partial
+
+
+def show(i):
+    return i
+
+
+funcs = [partial(show, i) for i in range(3)]
+print([f() for f in funcs])
+```
+
+**Output:**
+```
+[0, 1, 2]
+```
+
+| Technique | Snapshot taken | Trade-off |
+|-----------|----------------|-----------|
+| `lambda i=i: ...` | at definition | shortest; adds an overridable parameter to the signature |
+| factory `def bind(i): return lambda: i` | at each `bind()` call | signature stays clean; costs one extra function |
+| `partial(f, i)` | at the `partial()` call | only fits when you already have a named function |
 
 **Intuition.**
 
@@ -1148,10 +1320,9 @@ Click "save", get "quit". All three handlers close over the same `name`, and the
 
 <div style="border-left:4px solid #195045;background:rgba(25,80,69,0.08);padding:0.6rem 1rem;border-radius:0 0.5rem 0.5rem 0;margin:1.25rem 0">
 
-💡 **Earned rule.** A function remembers *where to look* (the variable), not *what it found* (the value) — unless you force an early snapshot with a default argument. So whenever you build functions inside a loop that mention the loop variable, capture it with `var=var`. As for lambdas themselves: keep them to short throwaway callables passed to a higher-order function (`key=`, `map`, a callback). The moment one needs a statement, wants a docstring, gets reused, or grows past a line, write a `def` — you gain a real name in tracebacks and lose nothing. Assigning a lambda to a variable (`f = lambda x: ...`) is the one clearly pointless case: that is a `def` with worse debugging. Note this is the *same* definition-time-versus-call-time rule as the mutable-default trap in §4 — there it bites you, here you wield it on purpose.
+💡 **Earned rule.** A function remembers *where to look* (the variable), not *what it found* (the value) — unless you force an early snapshot with a default argument. So whenever you build functions inside a loop that mention the loop variable, capture it with `var=var`; reach for a factory function instead when the callback's signature has to stay clean. This is not a `lambda` quirk and not a loop quirk — `def` behaves identically, and a comprehension's private scope does not help, because it is one frame for the whole comprehension rather than one per iteration. As for lambdas themselves: keep them to short throwaway callables passed to a higher-order function (`key=`, `map`, a callback). The moment one needs a statement, wants a docstring, gets reused, or grows past a line, write a `def` — you gain a real name in tracebacks and lose nothing. Assigning a lambda to a variable (`f = lambda x: ...`) is the one clearly pointless case: that is a `def` with worse debugging. Note this is the *same* definition-time-versus-call-time rule as the mutable-default trap in §4 — there it bites you, here you wield it on purpose.
 
 </div>
-
 ---
 
 ## 11. Closures
