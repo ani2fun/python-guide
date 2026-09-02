@@ -51,7 +51,7 @@ This is the deep pass of [Functions, the Basics](/synapse/programming-languages/
   - [8. Docstrings, annotations, introspection](#8-docstrings-annotations-introspection)
   - [9. First-class and higher-order functions](#9-first-class-and-higher-order-functions)
   - [10. Lambdas and the late-binding trap](#10-lambdas-and-the-late-binding-trap)
-  - [The late-binding trap](#the-late-binding-trap)
+    - [The late-binding trap](#the-late-binding-trap)
     - [It is not about loops](#it-is-not-about-loops)
     - [It is not about `lambda` either](#it-is-not-about-lambda-either)
     - [Proving they share one variable](#proving-they-share-one-variable)
@@ -1115,7 +1115,7 @@ print(parity(4), parity(7))
 even odd
 ```
 
-## The late-binding trap
+### The late-binding trap
 
 ```python run
 funcs = [lambda: i for i in range(3)]
