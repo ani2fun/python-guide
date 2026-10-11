@@ -12,7 +12,7 @@ The book is a single text, read top to bottom. It starts assuming **you have nev
 
 ## Reading conventions
 
-- **Every code block with a Run button is real.** Cortex executes it in a sandboxed **Python 3.13** runner — the same one that produced every `Output:` block in this book. Click ▶ Run, edit the code, run it again. The output you see is the output we verified.
+- **Every code block with a Run button is real.** Synapse executes it in a sandboxed **Python 3.13** runner — the same one that produced every `Output:` block in this book. Click ▶ Run, edit the code, run it again. The output you see is the output we verified.
 - **Blocks without a Run button are deliberate** — short fragments, or snippets shown precisely because they *break*. Their output is still shown and still real.
 - **Every chapter is built on a thesis** stated in its first paragraph, and a fixed rhythm: concept → code → verified output → analysis ("what happened") → an **Intuition** box ("why it must be so").
 
